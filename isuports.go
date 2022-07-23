@@ -591,6 +591,10 @@ type VisitHistorySummaryRow struct {
 	MinCreatedAt int64  `db:"min_created_at"`
 }
 
+var billingCache Map[int64, *Map[string, []string]]
+
+var billingSingle singleflight.Group
+
 // 大会ごとの課金レポートを計算する
 func billingReportByCompetition(ctx context.Context, tenantDB dbOrTx, tenantID int64, competitonID string) (*BillingReport, error) {
 	comp, err := retrieveCompetition(ctx, tenantDB, competitonID)
@@ -618,23 +622,42 @@ func billingReportByCompetition(ctx context.Context, tenantDB dbOrTx, tenantID i
 		billingMap[vh.PlayerID] = "visitor"
 	}
 
-	// player_scoreを読んでいるときに更新が走ると不整合が起こるのでロックを取得する
-	fl, err := RflockByTenantID(tenantID)
-	if err != nil {
-		return nil, fmt.Errorf("error flockByTenantID: %w", err)
-	}
-	defer fl.Close()
+	v, err, _ := billingSingle.Do(strconv.FormatInt(tenantID, 10)+"-"+comp.ID, func() (interface{}, error) {
+		// player_scoreを読んでいるときに更新が走ると不整合が起こるのでロックを取得する
+		fl, err := RflockByTenantID(tenantID)
+		if err != nil {
+			return nil, fmt.Errorf("error flockByTenantID: %w", err)
+		}
+		defer fl.Close()
 
-	// スコアを登録した参加者のIDを取得する
-	scoredPlayerIDs := []string{}
-	if err := tenantDB.SelectContext(
-		ctx,
-		&scoredPlayerIDs,
-		"SELECT DISTINCT(player_id) FROM player_score WHERE competition_id = ?",
-		comp.ID,
-	); err != nil && err != sql.ErrNoRows {
-		return nil, fmt.Errorf("error Select count player_score: tenantID=%d, competitionID=%s, %w", tenantID, competitonID, err)
+		cache, _ := billingCache.LoadOrStore(tenantID, &Map[string, []string]{})
+
+		if value, ok := cache.Load(comp.ID); ok {
+			return value, nil
+		}
+
+		// スコアを登録した参加者のIDを取得する
+		scoredPlayerIDs := []string{}
+		if err := tenantDB.SelectContext(
+			ctx,
+			&scoredPlayerIDs,
+			"SELECT DISTINCT(player_id) FROM player_score WHERE competition_id = ?",
+			comp.ID,
+		); err != nil && err != sql.ErrNoRows {
+			return nil, fmt.Errorf("error Select count player_score: tenantID=%d, competitionID=%s, %w", tenantID, competitonID, err)
+		}
+
+		cache.Store(comp.ID, scoredPlayerIDs)
+
+		return scoredPlayerIDs, nil
+	})
+
+	if err != nil {
+		return nil, err
 	}
+
+	scoredPlayerIDs := v.([]string)
+
 	for _, pid := range scoredPlayerIDs {
 		// スコアが登録されている参加者
 		billingMap[pid] = "player"
@@ -652,6 +675,7 @@ func billingReportByCompetition(ctx context.Context, tenantDB dbOrTx, tenantID i
 			}
 		}
 	}
+
 	return &BillingReport{
 		CompetitionID:     comp.ID,
 		CompetitionTitle:  comp.Title,
@@ -1163,6 +1187,8 @@ func competitionScoreHandler(c echo.Context) error {
 	}
 	defer fl.Close()
 	competitionRanking.Delete(competitionID)
+	actual, _ := billingCache.LoadOrStore(v.tenantID, &Map[string, []string]{})
+	actual.Delete(competitionID)
 
 	if _, err := tenantDB.ExecContext(
 		ctx,
@@ -1702,6 +1728,8 @@ type InitializeHandlerResult struct {
 // データベースの初期化などが実行されるため、スキーマを変更した場合などは適宜改変すること
 func initializeHandler(c echo.Context) error {
 	tenantIDToplayerIDToDisplayName = Map[int64, *Map[string, string]]{}
+	competitionRanking = Map[string, []CompetitionRank]{}
+	locks = Map[int64, *sync.RWMutex]{}
 
 	out, err := exec.Command(initializeScript).CombinedOutput()
 	if err != nil {
