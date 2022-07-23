@@ -838,6 +838,9 @@ func tenantsBillingHandler(c echo.Context) error {
 			break
 		}
 	}
+
+	wg.Wait()
+
 	tenantBillings = append(tenantBillings, node3Result.Data.Tenants...)
 	sort.Slice(tenantBillings, func(i, j int) bool {
 		return tenantBillings[i].ID > tenantBillings[j].ID
