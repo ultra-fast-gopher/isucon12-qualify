@@ -29,7 +29,6 @@ import (
 	"github.com/lestrrat-go/jwx/v2/jwa"
 	"github.com/lestrrat-go/jwx/v2/jwk"
 	"github.com/lestrrat-go/jwx/v2/jwt"
-	_ "github.com/ultra-fast-gopher/ufgutil"
 	"golang.org/x/sync/errgroup"
 	"golang.org/x/sync/singleflight"
 )
