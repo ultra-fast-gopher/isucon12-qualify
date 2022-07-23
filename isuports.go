@@ -594,15 +594,7 @@ func tenantsAddHandler(c echo.Context) error {
 		return fmt.Errorf("error get LastInsertId: %w", err)
 	}
 	if id%2 == 1 {
-		req, err := http.NewRequest("POST", "http://isuports-3.t.isucon.dev:3000/add_tenant?id="+strconv.FormatInt(id, 10), strings.NewReader("{}"))
-
-		if err != nil {
-			return err
-		}
-
-		req.Header.Add("Host", c.Request().Host)
-
-		resp, err := httpClient.Do(req)
+		resp, err := httpClient.Post("http://isuports-3.t.isucon.dev:3000/add_tenant?id="+strconv.FormatInt(id, 10), "application/json", strings.NewReader("{}"))
 
 		if err != nil {
 			return err
@@ -813,7 +805,6 @@ func tenantsBillingHandler(c echo.Context) error {
 		}
 
 		req.Header = c.Request().Header
-		req.Header.Add("Host", c.Request().Host)
 		resp, err := httpClient.Do(req)
 
 		if err != nil {
