@@ -145,10 +145,6 @@ func init() {
 	hostname, _ = os.Hostname()
 }
 
-var (
-	tenantNameToID Map[string, int64]
-)
-
 func setupProxy(e *echo.Echo) {
 	if hostname == "node3" {
 		return
@@ -165,23 +161,17 @@ func setupProxy(e *echo.Echo) {
 		},
 	})
 	config.Skipper = func(c echo.Context) bool {
+		row, err := retrieveTenantRowFromHeader(c)
+
+		if err != nil {
+			return true // node1
+		}
+
 		if c.Request().URL.Path == "/api/admin/tenants/billing" {
 			return true // force node1
 		}
 
-		id, ok := tenantNameToID.Load(c.Request().Host)
-
-		if !ok {
-			row, err := retrieveTenantRowFromHeader(c)
-			if err != nil {
-				tenantNameToID.Store(c.Request().Host, 0)
-				return true // node1
-			}
-			tenantNameToID.Store(c.Request().Host, row.ID)
-			id = row.ID
-		}
-
-		if id%2 == 1 {
+		if row.ID%2 == 1 {
 			return false // node3
 		}
 
@@ -598,7 +588,6 @@ func tenantsAddHandler(c echo.Context) error {
 			name, displayName, now, now, err,
 		)
 	}
-	tenantNameToID.Delete(name)
 
 	id, err := insertRes.LastInsertId()
 	if err != nil {
@@ -1509,7 +1498,7 @@ func playerHandler(c echo.Context) error {
 	p, err := retrievePlayer(ctx, tenantDB, playerID)
 	if err != nil {
 		if errors.Is(err, sql.ErrNoRows) {
-			return echo.NewHTTPError(http.StatusNotFound, "player not found "+fmt.Sprint(v.tenantID)+" "+v.tenantName)
+			return echo.NewHTTPError(http.StatusNotFound, "player not found")
 		}
 		return fmt.Errorf("error retrievePlayer: %w", err)
 	}
@@ -1943,8 +1932,6 @@ func initializeHandler(c echo.Context) error {
 			return nil
 		})
 	}
-
-	tenantNameToID = Map[string, int64]{}
 	tenantIDToplayerIDToDisplayName = Map[int64, *Map[string, string]]{}
 
 	out, err := exec.Command(initializeScript).CombinedOutput()
