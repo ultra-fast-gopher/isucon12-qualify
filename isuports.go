@@ -29,6 +29,7 @@ import (
 	"github.com/lestrrat-go/jwx/v2/jwk"
 	"github.com/lestrrat-go/jwx/v2/jwt"
 	_ "github.com/ultra-fast-gopher/ufgutil"
+	"golang.org/x/sync/singleflight"
 )
 
 const (
@@ -1152,6 +1153,7 @@ func competitionScoreHandler(c echo.Context) error {
 		return fmt.Errorf("error flockByTenantID: %w", err)
 	}
 	defer fl.Close()
+	competitionRanking.Delete(competitionID)
 
 	if _, err := tenantDB.ExecContext(
 		ctx,
@@ -1354,6 +1356,11 @@ type CompetitionRankingHandlerResult struct {
 	Ranks       []CompetitionRank `json:"ranks"`
 }
 
+var (
+	competitionRanking Map[string, []CompetitionRank]
+	competitionGroup   singleflight.Group
+)
+
 // 参加者向けAPI
 // GET /api/player/competition/:competition_id/ranking
 // 大会ごとのランキングを取得する
@@ -1417,48 +1424,67 @@ func competitionRankingHandler(c echo.Context) error {
 	}
 
 	// player_scoreを読んでいるときに更新が走ると不整合が起こるのでロックを取得する
-	fl, err := RflockByTenantID(v.tenantID)
-	if err != nil {
-		return fmt.Errorf("error flockByTenantID: %w", err)
-	}
-	defer fl.Close()
-	pss := []PlayerScoreRow{}
-	if err := tenantDB.SelectContext(
-		ctx,
-		&pss,
-		"SELECT * FROM player_score WHERE competition_id = ? ORDER BY row_num DESC",
-		competitionID,
-	); err != nil {
-		return fmt.Errorf("error Select player_score: tenantID=%d, competitionID=%s, %w", tenant.ID, competitionID, err)
-	}
-	ranks := make([]CompetitionRank, 0, len(pss))
-	scoredPlayerSet := make(map[string]struct{}, len(pss))
-	for _, ps := range pss {
-		// player_scoreが同一player_id内ではrow_numの降順でソートされているので
-		// 現れたのが2回目以降のplayer_idはより大きいrow_numでスコアが出ているとみなせる
-		if _, ok := scoredPlayerSet[ps.PlayerID]; ok {
-			continue
-		}
-		scoredPlayerSet[ps.PlayerID] = struct{}{}
-		name, err := retrievePlayerName(ctx, tenantDB, v.tenantID, ps.PlayerID)
+
+	iface, err, _ := competitionGroup.Do(strconv.FormatInt(v.tenantID, 10)+"-"+competitionID, func() (interface{}, error) {
+		fl, err := RflockByTenantID(v.tenantID)
 		if err != nil {
-			return fmt.Errorf("error retrievePlayer: %w", err)
+			return nil, fmt.Errorf("error flockByTenantID: %w", err)
 		}
-		ranks = append(ranks, CompetitionRank{
-			Score:             ps.Score,
-			PlayerID:          ps.PlayerID,
-			PlayerDisplayName: name,
-			RowNum:            ps.RowNum,
+		defer fl.Close()
+
+		result, ok := competitionRanking.Load(competitionID)
+
+		if ok {
+			return result, nil
+		}
+
+		pss := []PlayerScoreRow{}
+		if err := tenantDB.SelectContext(
+			ctx,
+			&pss,
+			"SELECT * FROM player_score WHERE competition_id = ? ORDER BY row_num DESC",
+			competitionID,
+		); err != nil {
+			return nil, fmt.Errorf("error Select player_score: tenantID=%d, competitionID=%s, %w", tenant.ID, competitionID, err)
+		}
+		ranks := make([]CompetitionRank, 0, len(pss))
+		scoredPlayerSet := make(map[string]struct{}, len(pss))
+		for _, ps := range pss {
+			// player_scoreが同一player_id内ではrow_numの降順でソートされているので
+			// 現れたのが2回目以降のplayer_idはより大きいrow_numでスコアが出ているとみなせる
+			if _, ok := scoredPlayerSet[ps.PlayerID]; ok {
+				continue
+			}
+			scoredPlayerSet[ps.PlayerID] = struct{}{}
+			name, err := retrievePlayerName(ctx, tenantDB, v.tenantID, ps.PlayerID)
+			if err != nil {
+				return nil, fmt.Errorf("error retrievePlayer: %w", err)
+			}
+			ranks = append(ranks, CompetitionRank{
+				Score:             ps.Score,
+				PlayerID:          ps.PlayerID,
+				PlayerDisplayName: name,
+				RowNum:            ps.RowNum,
+			})
+		}
+		sort.Slice(ranks, func(i, j int) bool {
+			if ranks[i].Score == ranks[j].Score {
+				return ranks[i].RowNum < ranks[j].RowNum
+			}
+			return ranks[i].Score > ranks[j].Score
 		})
-	}
-	sort.Slice(ranks, func(i, j int) bool {
-		if ranks[i].Score == ranks[j].Score {
-			return ranks[i].RowNum < ranks[j].RowNum
-		}
-		return ranks[i].Score > ranks[j].Score
+
+		competitionRanking.Store(competitionID, ranks)
+
+		return ranks, nil
 	})
+
+	if err != nil {
+		return fmt.Errorf("failed to fetch ranking: %w", err)
+	}
+
 	pagedRanks := make([]CompetitionRank, 0, 100)
-	for i, rank := range ranks {
+	for i, rank := range iface.([]CompetitionRank) {
 		if int64(i) < rankAfter {
 			continue
 		}
@@ -1484,6 +1510,7 @@ func competitionRankingHandler(c echo.Context) error {
 			Ranks: pagedRanks,
 		},
 	}
+
 	return c.JSON(http.StatusOK, res)
 }
 
