@@ -10,7 +10,7 @@ jobs:
       - uses: actions/checkout@v3
       - name: Build
         run: |
-          export PATH=/home/isucon/local/go/bin:/home/isucon/go/bin:$PATH
+          export PATH=/home/isucon/local/go/bin:/home/isucon/go/bin:/usr/local/go/bin:$PATH
           export HASH="${GITHUB_SHA:0:7}"
           make isuports
           sudo mv isuports /home/isucon/webapp/go/isuports
