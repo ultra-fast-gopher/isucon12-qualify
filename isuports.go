@@ -808,7 +808,7 @@ func tenantsBillingHandler(c echo.Context) error {
 	//   を合計したものを
 	// テナントの課金とする
 	ts := []TenantRow{}
-	if err := adminDB.SelectContext(ctx, &ts, "SELECT * FROM tenant ORDER BY id DESC"); err != nil {
+	if err := adminDB.SelectContext(ctx, &ts, "SELECT * FROM tenant WHERE id < ? AND id % 2 = 0 ORDER BY id DESC", beforeID); err != nil {
 		return fmt.Errorf("error Select tenant: %w", err)
 	}
 
@@ -882,7 +882,7 @@ func tenantsBillingHandler(c echo.Context) error {
 			return nil
 		})
 
-		if idx >= 11 {
+		if idx >= 10 {
 			break
 		}
 	}
@@ -943,7 +943,7 @@ func tenantsBillingHandler3(c echo.Context) error {
 	//   を合計したものを
 	// テナントの課金とする
 	ts := []TenantRow{}
-	if err := adminDB.SelectContext(ctx, &ts, "SELECT * FROM tenant ORDER BY id DESC"); err != nil {
+	if err := adminDB.SelectContext(ctx, &ts, "SELECT * FROM tenant WHERE id < ? AND id % 2 = 1 ORDER BY id DESC", beforeID); err != nil {
 		return fmt.Errorf("error Select tenant: %w", err)
 	}
 	tenantBillings := make([]TenantWithBilling, 0, len(ts))
