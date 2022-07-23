@@ -1,0 +1,13 @@
+[Unit]
+Description=backup with shutdown
+Before=shutdown.target reboot.target
+DefaultDependencies=no
+
+[Service]
+Type=oneshot
+ExecStart=cp /home/isucon/webapp/tenant_db_memory/*.db /home/isucon/webapp/tenant_db/
+
+[Install]
+WantedBy=shutdown.target
+
+
