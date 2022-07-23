@@ -238,6 +238,8 @@ func Run() {
 	// ベンチマーカー向けAPI
 	e.POST("/initialize", initializeHandler)
 
+	e.POST("/add_tenant", addTenant)
+
 	e.HTTPErrorHandler = errorResponseHandler
 
 	adminDB, err = connectAdminDB()
@@ -591,11 +593,20 @@ func tenantsAddHandler(c echo.Context) error {
 	if err != nil {
 		return fmt.Errorf("error get LastInsertId: %w", err)
 	}
-	// NOTE: 先にadminDBに書き込まれることでこのAPIの処理中に
-	//       /api/admin/tenants/billingにアクセスされるとエラーになりそう
-	//       ロックなどで対処したほうが良さそう
-	if err := createTenantDB(id); err != nil {
-		return fmt.Errorf("error createTenantDB: id=%d name=%s %w", id, name, err)
+	if id%2 == 1 {
+		resp, err := httpClient.Post("http://isuports-3.t.isucon.dev:3000/add_tenant?id="+strconv.FormatInt(id, 10), "application/json", strings.NewReader("{}"))
+
+		if err != nil {
+			return err
+		}
+		defer resp.Body.Close()
+	} else {
+		// NOTE: 先にadminDBに書き込まれることでこのAPIの処理中に
+		//       /api/admin/tenants/billingにアクセスされるとエラーになりそう
+		//       ロックなどで対処したほうが良さそう
+		if err := createTenantDB(id); err != nil {
+			return fmt.Errorf("error createTenantDB: id=%d name=%s %w", id, name, err)
+		}
 	}
 
 	res := TenantsAddHandlerResult{
@@ -607,6 +618,16 @@ func tenantsAddHandler(c echo.Context) error {
 		},
 	}
 	return c.JSON(http.StatusOK, SuccessResult{Status: true, Data: res})
+}
+
+func addTenant(c echo.Context) error {
+	id, _ := strconv.ParseInt(c.QueryParam("id"), 10, 64)
+
+	if err := createTenantDB(id); err != nil {
+		return fmt.Errorf("error createTenantDB: id=%d %w", id, err)
+	}
+
+	return nil
 }
 
 // テナント名が規則に沿っているかチェックする
