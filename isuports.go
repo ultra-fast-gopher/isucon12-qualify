@@ -4,13 +4,11 @@ import (
 	"context"
 	"database/sql"
 	"encoding/csv"
-	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
 	"math/rand"
 	"net/http"
-	"net/url"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -31,7 +29,6 @@ import (
 	"github.com/lestrrat-go/jwx/v2/jwk"
 	"github.com/lestrrat-go/jwx/v2/jwt"
 	_ "github.com/ultra-fast-gopher/ufgutil"
-	"golang.org/x/sync/errgroup"
 	"golang.org/x/sync/singleflight"
 )
 
@@ -139,53 +136,9 @@ func SetCacheControlPrivate(next echo.HandlerFunc) echo.HandlerFunc {
 	}
 }
 
-var hostname string
-
-func init() {
-	hostname, _ = os.Hostname()
-}
-
-func setupProxy(e *echo.Echo) {
-	if hostname == "node3" {
-		return
-	}
-
-	url, err := url.Parse("http://isuports-3.t.isucon.dev:3000")
-	if err != nil {
-		e.Logger.Fatal(err)
-	}
-	config := middleware.DefaultProxyConfig
-	config.Balancer = middleware.NewRoundRobinBalancer([]*middleware.ProxyTarget{
-		{
-			URL: url,
-		},
-	})
-	config.Skipper = func(c echo.Context) bool {
-		row, err := retrieveTenantRowFromHeader(c)
-
-		if err != nil {
-			return true // node1
-		}
-
-		if c.Request().URL.Path == "/api/admin/tenants/billing" {
-			return true // force node1
-		}
-
-		if row.ID%2 == 1 {
-			return false // node3
-		}
-
-		return true // node1
-	}
-	proxy := middleware.ProxyWithConfig(config)
-	e.Use(proxy)
-}
-
 // Run は cmd/isuports/main.go から呼ばれるエントリーポイントです
 func Run() {
 	e := echo.New()
-	setupProxy(e)
-
 	e.Debug = true
 	e.Logger.SetLevel(log.DEBUG)
 
@@ -209,12 +162,8 @@ func Run() {
 
 	// SaaS管理者向けAPI
 	e.POST("/api/admin/tenants/add", tenantsAddHandler)
+	e.GET("/api/admin/tenants/billing", tenantsBillingHandler)
 
-	if hostname == "node1" {
-		e.GET("/api/admin/tenants/billing", tenantsBillingHandler)
-	} else {
-		e.GET("/api/admin/tenants/billing", tenantsBillingHandler3)
-	}
 	// テナント管理者向けAPI - 参加者追加、一覧、失格
 	e.GET("/api/organizer/players", playersListHandler)
 	e.POST("/api/organizer/players/add", playersAddHandler)
@@ -723,13 +672,6 @@ type TenantsBillingHandlerResult struct {
 	Tenants []TenantWithBilling `json:"tenants"`
 }
 
-type SuccessResultTenantsBillingHandlerResult struct {
-	Status bool                        `json:"status"`
-	Data   TenantsBillingHandlerResult `json:"data,omitempty"`
-}
-
-var httpClient http.Client
-
 // SaaS管理者用API
 // テナントごとの課金レポートを最大10件、テナントのid降順で取得する
 // GET /api/admin/tenants/billing
@@ -771,136 +713,11 @@ func tenantsBillingHandler(c echo.Context) error {
 	if err := adminDB.SelectContext(ctx, &ts, "SELECT * FROM tenant ORDER BY id DESC"); err != nil {
 		return fmt.Errorf("error Select tenant: %w", err)
 	}
-	tenantBillings := make([]TenantWithBilling, len(ts))
-	var wg errgroup.Group
-	var idx int
-
-	var node3Result SuccessResultTenantsBillingHandlerResult
-	wg.Go(func() error {
-		req, err := http.NewRequest("GET", "http://isuports-3.t.isucon.dev:3000/api/admin/tenants/billing?before="+before, nil)
-
-		if err != nil {
-			return err
-		}
-
-		req.Header = c.Request().Header
-		resp, err := httpClient.Do(req)
-
-		if err != nil {
-			return err
-		}
-		defer resp.Body.Close()
-
-		return json.NewDecoder(resp.Body).Decode(&node3Result)
-	})
-
-	for _, t := range ts {
-		if beforeID != 0 && beforeID <= t.ID {
-			continue
-		}
-		if t.ID%2 == 1 {
-			continue
-		}
-		i := idx
-		idx++
-
-		wg.Go(func() error {
-			tb := TenantWithBilling{
-				ID:          strconv.FormatInt(t.ID, 10),
-				Name:        t.Name,
-				DisplayName: t.DisplayName,
-			}
-			tenantDB, err := connectToTenantDB(t.ID)
-			if err != nil {
-				return fmt.Errorf("failed to connectToTenantDB: %w", err)
-			}
-			defer tenantDB.Close()
-			cs := []CompetitionRow{}
-			if err := tenantDB.SelectContext(
-				ctx,
-				&cs,
-				"SELECT * FROM competition",
-			); err != nil {
-				return fmt.Errorf("failed to Select competition: %w", err)
-			}
-			for _, comp := range cs {
-				report, err := billingReportByCompetition(ctx, tenantDB, t.ID, comp.ID)
-				if err != nil {
-					return fmt.Errorf("failed to billingReportByCompetition: %w", err)
-				}
-				tb.BillingYen += report.BillingYen
-			}
-			tenantBillings[i] = tb
-			return nil
-		})
-
-		if idx >= 10 {
-			break
-		}
-	}
-	tenantBillings = append(tenantBillings, node3Result.Data.Tenants...)
-	sort.Slice(tenantBillings, func(i, j int) bool {
-		return tenantBillings[i].ID > tenantBillings[j].ID
-	})
-
-	if len(tenantBillings) > 10 {
-		tenantBillings = tenantBillings[:10]
-	}
-
-	return c.JSON(http.StatusOK, SuccessResult{
-		Status: true,
-		Data: TenantsBillingHandlerResult{
-			Tenants: tenantBillings,
-		},
-	})
-}
-
-func tenantsBillingHandler3(c echo.Context) error {
-	if host := c.Request().Host; host != getEnv("ISUCON_ADMIN_HOSTNAME", "admin.t.isucon.dev") {
-		return echo.NewHTTPError(
-			http.StatusNotFound,
-			fmt.Sprintf("invalid hostname %s", host),
-		)
-	}
-
-	ctx := context.Background()
-	if v, err := parseViewer(c); err != nil {
-		return err
-	} else if v.role != RoleAdmin {
-		return echo.NewHTTPError(http.StatusForbidden, "admin role required")
-	}
-
-	before := c.QueryParam("before")
-	var beforeID int64
-	if before != "" {
-		var err error
-		beforeID, err = strconv.ParseInt(before, 10, 64)
-		if err != nil {
-			return echo.NewHTTPError(
-				http.StatusBadRequest,
-				fmt.Sprintf("failed to parse query parameter 'before': %s", err.Error()),
-			)
-		}
-	}
-	// テナントごとに
-	//   大会ごとに
-	//     scoreが登録されているplayer * 100
-	//     scoreが登録されていないplayerでアクセスした人 * 10
-	//   を合計したものを
-	// テナントの課金とする
-	ts := []TenantRow{}
-	if err := adminDB.SelectContext(ctx, &ts, "SELECT * FROM tenant ORDER BY id DESC"); err != nil {
-		return fmt.Errorf("error Select tenant: %w", err)
-	}
 	tenantBillings := make([]TenantWithBilling, 0, len(ts))
 	for _, t := range ts {
 		if beforeID != 0 && beforeID <= t.ID {
 			continue
 		}
-		if t.ID%2 == 0 {
-			continue
-		}
-
 		err := func(t TenantRow) error {
 			tb := TenantWithBilling{
 				ID:          strconv.FormatInt(t.ID, 10),
@@ -1874,13 +1691,6 @@ type InitializeHandlerResult struct {
 // ベンチマーカーが起動したときに最初に呼ぶ
 // データベースの初期化などが実行されるため、スキーマを変更した場合などは適宜改変すること
 func initializeHandler(c echo.Context) error {
-	resp, err := httpClient.Post("http://isuports-3.t.isucon.dev:3000/initialize", "application/json", strings.NewReader("{}"))
-
-	if err != nil {
-		return err
-	}
-	defer resp.Body.Close()
-
 	tenantIDToplayerIDToDisplayName = Map[int64, *Map[string, string]]{}
 
 	out, err := exec.Command(initializeScript).CombinedOutput()
