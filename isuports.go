@@ -1874,13 +1874,21 @@ type InitializeHandlerResult struct {
 // ベンチマーカーが起動したときに最初に呼ぶ
 // データベースの初期化などが実行されるため、スキーマを変更した場合などは適宜改変すること
 func initializeHandler(c echo.Context) error {
-	resp, err := httpClient.Post("http://isuports-3.t.isucon.dev:3000/initialize", "application/json", strings.NewReader("{}"))
+	var wg errgroup.Group
+	defer wg.Wait()
 
-	if err != nil {
-		return err
+	if hostname != "node3" {
+		wg.Go(func() error {
+			resp, err := httpClient.Post("http://isuports-3.t.isucon.dev:3000/initialize", "application/json", strings.NewReader("{}"))
+
+			if err != nil {
+				return err
+			}
+			defer resp.Body.Close()
+
+			return nil
+		})
 	}
-	defer resp.Body.Close()
-
 	tenantIDToplayerIDToDisplayName = Map[int64, *Map[string, string]]{}
 
 	out, err := exec.Command(initializeScript).CombinedOutput()
