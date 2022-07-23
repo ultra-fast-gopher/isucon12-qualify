@@ -48,6 +48,8 @@ var (
 	adminDB *sqlx.DB
 
 	sqliteDriverName = "sqlite3"
+
+	tenantIDToplayerIDToDisplayName Map[int64, Map[string, string]]
 )
 
 // 環境変数を取得する、なければデフォルト値を返す
@@ -366,6 +368,26 @@ type PlayerRow struct {
 	IsDisqualified bool   `db:"is_disqualified"`
 	CreatedAt      int64  `db:"created_at"`
 	UpdatedAt      int64  `db:"updated_at"`
+}
+
+func retrievePlayerName(ctx context.Context, tenantDB dbOrTx, tenantID int64, id string) (string, error) {
+	playerIDToDisplayName, _ := tenantIDToplayerIDToDisplayName.LoadOrStore(tenantID, Map[string, string]{})
+
+	value, ok := playerIDToDisplayName.Load(id)
+
+	if ok {
+		return value, nil
+	}
+
+	player, err := retrievePlayer(ctx, tenantDB, id)
+
+	if err != nil {
+		return "", fmt.Errorf("failed to retrievePlayer: %w", err)
+	}
+
+	playerIDToDisplayName.Store(id, player.DisplayName)
+
+	return player.DisplayName, nil
 }
 
 // 参加者を取得する
@@ -1065,7 +1087,7 @@ func competitionScoreHandler(c echo.Context) error {
 			return fmt.Errorf("row must have two columns: %#v", row)
 		}
 		playerID, scoreStr := row[0], row[1]
-		if _, err := retrievePlayer(ctx, tenantDB, playerID); err != nil {
+		if _, err := retrievePlayerName(ctx, tenantDB, v.tenantID, playerID); err != nil {
 			// 存在しない参加者が含まれている
 			if errors.Is(err, sql.ErrNoRows) {
 				return echo.NewHTTPError(
@@ -1390,14 +1412,14 @@ func competitionRankingHandler(c echo.Context) error {
 			continue
 		}
 		scoredPlayerSet[ps.PlayerID] = struct{}{}
-		p, err := retrievePlayer(ctx, tenantDB, ps.PlayerID)
+		name, err := retrievePlayerName(ctx, tenantDB, v.tenantID, ps.PlayerID)
 		if err != nil {
 			return fmt.Errorf("error retrievePlayer: %w", err)
 		}
 		ranks = append(ranks, CompetitionRank{
 			Score:             ps.Score,
-			PlayerID:          p.ID,
-			PlayerDisplayName: p.DisplayName,
+			PlayerID:          ps.PlayerID,
+			PlayerDisplayName: name,
 			RowNum:            ps.RowNum,
 		})
 	}
@@ -1615,6 +1637,8 @@ type InitializeHandlerResult struct {
 // ベンチマーカーが起動したときに最初に呼ぶ
 // データベースの初期化などが実行されるため、スキーマを変更した場合などは適宜改変すること
 func initializeHandler(c echo.Context) error {
+	tenantIDToplayerIDToDisplayName = Map[int64, Map[string, string]]{}
+
 	out, err := exec.Command(initializeScript).CombinedOutput()
 	if err != nil {
 		return fmt.Errorf("error exec.Command: %s %e", string(out), err)
