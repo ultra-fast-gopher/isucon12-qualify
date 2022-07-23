@@ -800,6 +800,9 @@ func tenantsBillingHandler(c echo.Context) error {
 	if err := adminDB.SelectContext(ctx, &ts, "SELECT * FROM tenant ORDER BY id DESC"); err != nil {
 		return fmt.Errorf("error Select tenant: %w", err)
 	}
+	tenantBillings := make([]TenantWithBilling, len(ts))
+	var wg errgroup.Group
+	var idx int
 
 	var node3Result SuccessResultTenantsBillingHandlerResult
 	wg.Go(func() error {
@@ -821,9 +824,6 @@ func tenantsBillingHandler(c echo.Context) error {
 		return json.NewDecoder(resp.Body).Decode(&node3Result)
 	})
 
-	tenantBillings := make([]TenantWithBilling, 0, len(ts))
-	var wg errgroup.Group
-	var idx int
 	for _, t := range ts {
 		if beforeID != 0 && beforeID <= t.ID {
 			continue
@@ -834,7 +834,6 @@ func tenantsBillingHandler(c echo.Context) error {
 		t := t
 		i := idx
 		idx++
-		tenantBillings = append(tenantBillings, TenantWithBilling{})
 
 		wg.Go(func() error {
 			tb := TenantWithBilling{
