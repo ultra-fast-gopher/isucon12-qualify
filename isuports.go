@@ -880,7 +880,10 @@ func tenantsBillingHandler(c echo.Context) error {
 
 	tenantBillings = append(tenantBillings, node3Result.Data.Tenants...)
 	sort.Slice(tenantBillings, func(i, j int) bool {
-		return tenantBillings[i].ID > tenantBillings[j].ID
+		left, _ := strconv.ParseInt(tenantBillings[i].ID, 10, 64)
+		right, _ := strconv.ParseInt(tenantBillings[j].ID, 10, 64)
+
+		return left > right
 	})
 
 	if len(tenantBillings) > 10 {
