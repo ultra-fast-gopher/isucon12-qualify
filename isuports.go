@@ -605,7 +605,7 @@ func tenantsAddHandler(c echo.Context) error {
 	if err != nil {
 		return fmt.Errorf("error get LastInsertId: %w", err)
 	}
-	if id%2 == 0 {
+	if id%2 == 1 {
 		req, err := http.NewRequest("POST", "http://isuports-3.t.isucon.dev:3000/add_tenant?id="+strconv.FormatInt(id, 10), strings.NewReader("{}"))
 
 		if err != nil {
@@ -849,6 +849,9 @@ func tenantsBillingHandler(c echo.Context) error {
 		if beforeID != 0 && beforeID <= t.ID {
 			continue
 		}
+		if t.ID%2 == 1 {
+			continue
+		}
 		t := t
 		i := idx
 		idx++
@@ -961,6 +964,9 @@ func tenantsBillingHandler3(c echo.Context) error {
 
 	for _, t := range ts {
 		if beforeID != 0 && beforeID <= t.ID {
+			continue
+		}
+		if t.ID%2 == 0 {
 			continue
 		}
 		t := t
