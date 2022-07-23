@@ -759,6 +759,10 @@ func tenantsBillingHandler(c echo.Context) error {
 		})
 	}
 
+	if err := wg.Wait(); err != nil {
+		return err
+	}
+
 	return c.JSON(http.StatusOK, SuccessResult{
 		Status: true,
 		Data: TenantsBillingHandlerResult{
@@ -1251,7 +1255,7 @@ type PlayerHandlerResult struct {
 // 参加者の詳細情報を取得する
 func playerHandler(c echo.Context) error {
 	ctx := context.Background()
-	time.Sleep(2 * time.Second)
+	// time.Sleep(2 * time.Second)
 
 	v, err := parseViewer(c)
 	if err != nil {
