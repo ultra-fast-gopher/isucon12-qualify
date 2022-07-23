@@ -801,8 +801,6 @@ func tenantsBillingHandler(c echo.Context) error {
 		return fmt.Errorf("error Select tenant: %w", err)
 	}
 
-	var wg errgroup.Group
-
 	var node3Result SuccessResultTenantsBillingHandlerResult
 	wg.Go(func() error {
 		req, err := http.NewRequest("GET", "http://isuports-3.t.isucon.dev:3000/api/admin/tenants/billing?before="+before, nil)
@@ -824,6 +822,7 @@ func tenantsBillingHandler(c echo.Context) error {
 	})
 
 	tenantBillings := make([]TenantWithBilling, 0, len(ts))
+	var wg errgroup.Group
 	var idx int
 	for _, t := range ts {
 		if beforeID != 0 && beforeID <= t.ID {
