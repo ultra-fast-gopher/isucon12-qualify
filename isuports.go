@@ -8,6 +8,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"math"
 	"math/rand"
 	"net/http"
 	"net/url"
@@ -801,6 +802,10 @@ func tenantsBillingHandler(c echo.Context) error {
 			)
 		}
 	}
+	if beforeID == 0 {
+		beforeID = math.MaxInt64 - 100
+	}
+
 	// テナントごとに
 	//   大会ごとに
 	//     scoreが登録されているplayer * 100
@@ -936,6 +941,10 @@ func tenantsBillingHandler3(c echo.Context) error {
 			)
 		}
 	}
+	if beforeID == 0 {
+		beforeID = math.MaxInt64 - 100
+	}
+
 	// テナントごとに
 	//   大会ごとに
 	//     scoreが登録されているplayer * 100
