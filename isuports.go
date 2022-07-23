@@ -1630,7 +1630,7 @@ type InitializeHandlerResult struct {
 // ベンチマーカーが起動したときに最初に呼ぶ
 // データベースの初期化などが実行されるため、スキーマを変更した場合などは適宜改変すること
 func initializeHandler(c echo.Context) error {
-	tenantIDToplayerIDToDisplayName = Map[int64, Map[string, string]]{}
+	tenantIDToplayerIDToDisplayName = Map[int64, *Map[string, string]]{}
 
 	out, err := exec.Command(initializeScript).CombinedOutput()
 	if err != nil {
