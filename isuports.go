@@ -497,11 +497,6 @@ type TenantsAddHandlerResult struct {
 // テナントを追加する
 // POST /api/admin/tenants/add
 func tenantsAddHandler(c echo.Context) error {
-	// 30%の確率でラグらせる
-	if rand.Intn(100) >= 70 {
-		time.Sleep(time.Second)
-	}
-
 	v, err := parseViewer(c)
 	if err != nil {
 		return fmt.Errorf("error parseViewer: %w", err)
