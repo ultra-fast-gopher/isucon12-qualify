@@ -7,6 +7,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"math"
 	"math/rand"
 	"net/http"
 	"os"
@@ -29,6 +30,7 @@ import (
 	"github.com/lestrrat-go/jwx/v2/jwk"
 	"github.com/lestrrat-go/jwx/v2/jwt"
 	_ "github.com/ultra-fast-gopher/ufgutil"
+	"golang.org/x/sync/errgroup"
 	"golang.org/x/sync/singleflight"
 )
 
@@ -541,7 +543,7 @@ func tenantsAddHandler(c echo.Context) error {
 		return fmt.Errorf("error get LastInsertId: %w", err)
 	}
 	// NOTE: 先にadminDBに書き込まれることでこのAPIの処理中に
-	//       /api/admin/tenants/billingにアクセスされるとエラーになりそう
+	//       /api/admin/tenants/billingに	アクセスされるとエラーになりそう
 	//       ロックなどで対処したほうが良さそう
 	if err := createTenantDB(id); err != nil {
 		return fmt.Errorf("error createTenantDB: id=%d name=%s %w", id, name, err)
@@ -703,6 +705,10 @@ func tenantsBillingHandler(c echo.Context) error {
 			)
 		}
 	}
+	if beforeID == 0 {
+		beforeID = math.MaxInt64 - 100
+	}
+
 	// テナントごとに
 	//   大会ごとに
 	//     scoreが登録されているplayer * 100
@@ -710,15 +716,19 @@ func tenantsBillingHandler(c echo.Context) error {
 	//   を合計したものを
 	// テナントの課金とする
 	ts := []TenantRow{}
-	if err := adminDB.SelectContext(ctx, &ts, "SELECT * FROM tenant ORDER BY id DESC"); err != nil {
+	if err := adminDB.SelectContext(ctx, &ts, "SELECT * FROM tenant WHERE id < ? ORDER BY id DESC LIMIT 10", beforeID); err != nil {
 		return fmt.Errorf("error Select tenant: %w", err)
 	}
-	tenantBillings := make([]TenantWithBilling, 0, len(ts))
-	for _, t := range ts {
+	var wg errgroup.Group
+
+	tenantBillings := make([]TenantWithBilling, len(ts))
+	for i, t := range ts {
 		if beforeID != 0 && beforeID <= t.ID {
 			continue
 		}
-		err := func(t TenantRow) error {
+		t := t
+		i := i
+		wg.Go(func() error {
 			tb := TenantWithBilling{
 				ID:          strconv.FormatInt(t.ID, 10),
 				Name:        t.Name,
@@ -744,16 +754,11 @@ func tenantsBillingHandler(c echo.Context) error {
 				}
 				tb.BillingYen += report.BillingYen
 			}
-			tenantBillings = append(tenantBillings, tb)
+			tenantBillings[i] = tb
 			return nil
-		}(t)
-		if err != nil {
-			return err
-		}
-		if len(tenantBillings) >= 10 {
-			break
-		}
+		})
 	}
+
 	return c.JSON(http.StatusOK, SuccessResult{
 		Status: true,
 		Data: TenantsBillingHandlerResult{
