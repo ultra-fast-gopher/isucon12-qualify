@@ -813,6 +813,10 @@ func tenantsBillingHandler(c echo.Context) error {
 
 		req.Header = c.Request().Header
 		req.Header.Add("Host", c.Request().Host)
+		for _, c := range req.Response.Request.Cookies() {
+			req.AddCookie(c)
+		}
+
 		resp, err := httpClient.Do(req)
 
 		if err != nil {
