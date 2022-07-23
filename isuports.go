@@ -801,7 +801,6 @@ func tenantsBillingHandler(c echo.Context) error {
 		if t.ID%2 == 1 {
 			continue
 		}
-		t := t
 		i := idx
 		idx++
 
