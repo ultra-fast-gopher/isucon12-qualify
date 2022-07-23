@@ -486,7 +486,7 @@ func RflockByTenantID(tenantID int64) (io.Closer, error) {
 
 	mutex.RLock()
 
-	return &lockCloser{lock: mutex}, nil
+	return &rlockCloser{lock: mutex}, nil
 }
 
 type TenantsAddHandlerResult struct {
