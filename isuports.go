@@ -813,7 +813,7 @@ func tenantsBillingHandler(c echo.Context) error {
 
 		req.Header = c.Request().Header
 		req.Header.Add("Host", c.Request().Host)
-		for _, c := range c.Cookies() {
+		for _, c := range req.Cookies() {
 			req.AddCookie(c)
 		}
 
