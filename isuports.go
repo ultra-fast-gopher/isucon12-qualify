@@ -600,7 +600,7 @@ func tenantsAddHandler(c echo.Context) error {
 			return err
 		}
 
-		req.Header.Add("Host", c.Request().Host)
+		req.Host = c.Request().Host
 
 		resp, err := httpClient.Do(req)
 
@@ -812,7 +812,7 @@ func tenantsBillingHandler(c echo.Context) error {
 		}
 
 		req.Header = c.Request().Header
-		req.Header.Add("Host", c.Request().Host)
+		req.Host = c.Request().Host
 		for _, c := range c.Cookies() {
 			req.AddCookie(c)
 		}
