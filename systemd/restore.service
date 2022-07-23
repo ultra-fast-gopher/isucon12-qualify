@@ -1,0 +1,13 @@
+[Unit]
+Description=restore startup
+After=network.target
+DefaultDependencies=no
+
+[Service]
+Type=oneshot
+ExecStart=cp /home/isucon/webapp/tenant_db/*.db /home/isucon/webapp/tenant_db_memory/
+
+[Install]
+WantedBy=multi-user.target
+
+
