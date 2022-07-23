@@ -1246,7 +1246,7 @@ type PlayerHandlerResult struct {
 // 参加者の詳細情報を取得する
 func playerHandler(c echo.Context) error {
 	ctx := context.Background()
-	time.Sleep(500 * time.Millisecond)
+	time.Sleep(2 * time.Second)
 
 	v, err := parseViewer(c)
 	if err != nil {
