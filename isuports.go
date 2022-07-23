@@ -7,6 +7,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"math/rand"
 	"net/http"
 	"os"
 	"os/exec"
@@ -469,6 +470,11 @@ type TenantsAddHandlerResult struct {
 // テナントを追加する
 // POST /api/admin/tenants/add
 func tenantsAddHandler(c echo.Context) error {
+	// 30%の確率でラグらせる
+	if rand.Intn(100) >= 70 {
+		time.Sleep(time.Second)
+	}
+
 	v, err := parseViewer(c)
 	if err != nil {
 		return fmt.Errorf("error parseViewer: %w", err)
@@ -915,6 +921,11 @@ type CompetitionsAddHandlerResult struct {
 // POST /api/organizer/competitions/add
 // 大会を追加する
 func competitionsAddHandler(c echo.Context) error {
+	// 30%の確率でラグらせる
+	if rand.Intn(100) >= 70 {
+		time.Sleep(time.Second)
+	}
+
 	ctx := context.Background()
 	v, err := parseViewer(c)
 	if err != nil {
