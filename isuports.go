@@ -1730,6 +1730,7 @@ func initializeHandler(c echo.Context) error {
 	tenantIDToplayerIDToDisplayName = Map[int64, *Map[string, string]]{}
 	competitionRanking = Map[string, []CompetitionRank]{}
 	locks = Map[int64, *sync.RWMutex]{}
+	billingCache = Map[int64, *Map[string, []string]]{}
 
 	out, err := exec.Command(initializeScript).CombinedOutput()
 	if err != nil {
