@@ -871,7 +871,7 @@ func tenantsBillingHandler(c echo.Context) error {
 			return nil
 		})
 
-		if idx >= 10 {
+		if idx >= 11 {
 			break
 		}
 	}
