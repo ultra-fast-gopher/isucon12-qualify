@@ -182,7 +182,7 @@ func setupProxy(e *echo.Echo) {
 			id = row.ID
 		}
 
-		if id%2 == 0 {
+		if id%2 == 1 {
 			return false // node3
 		}
 
@@ -813,7 +813,7 @@ func tenantsBillingHandler(c echo.Context) error {
 	//   を合計したものを
 	// テナントの課金とする
 	ts := []TenantRow{}
-	if err := adminDB.SelectContext(ctx, &ts, "SELECT * FROM tenant WHERE id < ? AND id % 2 = 1 ORDER BY id DESC LIMIT 10", beforeID); err != nil {
+	if err := adminDB.SelectContext(ctx, &ts, "SELECT * FROM tenant WHERE id < ? AND id % 2 = 0 ORDER BY id DESC", beforeID); err != nil {
 		return fmt.Errorf("error Select tenant: %w", err)
 	}
 
@@ -892,9 +892,7 @@ func tenantsBillingHandler(c echo.Context) error {
 		}
 	}
 
-	if err := wg.Wait(); err != nil {
-		return err
-	}
+	wg.Wait()
 
 	tenantBillings = append(tenantBillings, node3Result.Data.Tenants...)
 	sort.Slice(tenantBillings, func(i, j int) bool {
@@ -954,14 +952,10 @@ func tenantsBillingHandler3(c echo.Context) error {
 	//   を合計したものを
 	// テナントの課金とする
 	ts := []TenantRow{}
-	if err := adminDB.SelectContext(ctx, &ts, "SELECT * FROM tenant WHERE id < ? AND id % 2 = 0 ORDER BY id DESC LIMIT 10", beforeID); err != nil {
+	if err := adminDB.SelectContext(ctx, &ts, "SELECT * FROM tenant WHERE id < ? AND id % 2 = 1 ORDER BY id DESC", beforeID); err != nil {
 		return fmt.Errorf("error Select tenant: %w", err)
 	}
 	tenantBillings := make([]TenantWithBilling, 0, len(ts))
-	var idx int
-
-	var wg errgroup.Group
-
 	for _, t := range ts {
 		if beforeID != 0 && beforeID <= t.ID {
 			continue
@@ -969,12 +963,8 @@ func tenantsBillingHandler3(c echo.Context) error {
 		if t.ID%2 == 0 {
 			continue
 		}
-		t := t
-		i := idx
-		idx++
-		tenantBillings = append(tenantBillings, TenantWithBilling{})
 
-		wg.Go(func() error {
+		err := func(t TenantRow) error {
 			tb := TenantWithBilling{
 				ID:          strconv.FormatInt(t.ID, 10),
 				Name:        t.Name,
@@ -1000,18 +990,16 @@ func tenantsBillingHandler3(c echo.Context) error {
 				}
 				tb.BillingYen += report.BillingYen
 			}
-			tenantBillings[i] = tb
+			tenantBillings = append(tenantBillings, tb)
 			return nil
-		})
-
-		if idx >= 10 {
+		}(t)
+		if err != nil {
+			return err
+		}
+		if len(tenantBillings) >= 10 {
 			break
 		}
 	}
-	if err := wg.Wait(); err != nil {
-		return err
-	}
-
 	return c.JSON(http.StatusOK, SuccessResult{
 		Status: true,
 		Data: TenantsBillingHandlerResult{
